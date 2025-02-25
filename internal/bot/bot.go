@@ -119,9 +119,9 @@ func (b *Bot) sendMessage(msg Message) {
 
 	select {
 	case b.messageChan <- msg:
-		log.Printf("Message sent to channel: %s", truncateString(msg.Text, 50))
+		log.Printf("Message sent to channel:\n%s", msg.Text)
 	default:
-		log.Printf("Message channel full, skipping message: %s", truncateString(msg.Text, 50))
+		log.Printf("Message channel full, skipping message:\n%s", msg.Text)
 	}
 }
 
@@ -152,14 +152,4 @@ func (b *Bot) extractURLFromEntities(text string, entities []tgbotapi.MessageEnt
 		}
 	}
 	return ""
-}
-
-// truncateString limits a string to a maximum length, appending "..."
-// if the string exceeds the limit. This helps in keeping log messages
-// readable while preserving important information.
-func truncateString(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen] + "..."
 }

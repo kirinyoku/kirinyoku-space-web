@@ -54,7 +54,7 @@ func (p *Processor) Start() {
 
 			select {
 			case p.outputChan <- *processed:
-				log.Printf("Processed message: %s", processed.Name)
+				log.Printf("Processed message: %+v", processed)
 			default:
 				log.Printf("Output channel full, skipping message: %s", processed.Name)
 			}
