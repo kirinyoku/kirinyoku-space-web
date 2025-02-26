@@ -1,5 +1,5 @@
 // Package db provides functionality for storing processed messages in MongoDB.
-// It handles database connections, data persistence, and index management.
+// It handles database connections, data persistence, index management and CRUD operations.
 package db
 
 import (
