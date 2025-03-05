@@ -5,6 +5,7 @@ package api
 
 import (
 	"log"
+	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/kirinyoku/kirinyoku-space-web/backend/internal/db"
@@ -21,6 +22,8 @@ type Server struct {
 func NewServer(db *db.DB) *Server {
 	router := gin.Default()
 
+	router.Use(corsMiddleware())
+
 	s := &Server{
 		db:     db,
 		router: router,
@@ -29,6 +32,27 @@ func NewServer(db *db.DB) *Server {
 	s.setupRoutes()
 
 	return s
+}
+
+// corsMiddleware adds CORS headers to allow requests from the frontend
+func corsMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Allow requests from the frontend origin
+		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+		// Allow specific methods
+		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		// Allow specific headers (if needed)
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Origin, Content-Type, Accept")
+
+		// Handle preflight OPTIONS requests
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(http.StatusNoContent)
+			return
+		}
+
+		// Proceed to the next handler
+		c.Next()
+	}
 }
 
 // setupRoutes configures all the routes for the HTTP server.

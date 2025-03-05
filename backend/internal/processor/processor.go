@@ -14,10 +14,10 @@ import (
 // ProcessedMessage represents a fully processed message ready for storage or further handling.
 // It contains structured data extracted from the original message text.
 type ProcessedMessage struct {
-	Name string   // The name or title of the resource
-	Type string   // The type or category of the resource
-	Tags []string // List of tags associated with the resource
-	URL  string   // URL linking to the resource
+	Name string   `json:"name"` // The name or title of the resource
+	Type string   `json:"type"` // The type or category of the resource
+	Tags []string `json:"tags"` // List of tags associated with the resource
+	URL  string   `json:"url"`  // URL linking to the resource
 }
 
 // Processor handles the transformation of raw bot messages into structured data.
