@@ -139,17 +139,8 @@ func (b *Bot) extractURLFromEntities(text string, entities []tgbotapi.MessageEnt
 			continue
 		}
 
-		start := entity.Offset
-		end := start + entity.Length
-
-		if start < 0 || end > len(text) {
-			log.Printf("Invalid entity bounds: start=%d, end=%d, text_length=%d", start, end, len(text))
-			continue
-		}
-
-		if text[start:end] == "link" {
-			return entity.URL
-		}
+		return entity.URL
 	}
+
 	return ""
 }

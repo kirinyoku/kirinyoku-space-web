@@ -2,147 +2,188 @@ package db
 
 import (
 	"context"
-	"fmt"
+	"strings"
 	"time"
 
 	"github.com/kirinyoku/kirinyoku-space-web/backend/internal/processor"
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
-// GetPots retrieves a paginated list of posts from the database.
-// It accepts page number and limit parameters to implement pagination.
-// Returns a slice of ProcessedMessage and an error if any occurs.
-func (db *DB) GetPosts(page int, limit int) ([]processor.ProcessedMessage, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	skip := (page - 1) * limit
-
-	findOptions := options.Find().
-		SetSkip(int64(skip)).
-		SetLimit(int64(limit))
-
-	cur, err := db.collection.Find(ctx, bson.D{}, findOptions)
-	if err != nil {
-		return nil, err
-	}
-	defer cur.Close(ctx)
-
-	var posts []processor.ProcessedMessage
-	for cur.Next(ctx) {
-		var message processor.ProcessedMessage
-		if err := cur.Decode(&message); err != nil {
-			return nil, err
-		}
-
-		posts = append(posts, message)
-	}
-
-	if err := cur.Err(); err != nil {
-		return nil, err
-	}
-
-	return posts, nil
+// PostsResponse represents the response structure for post queries
+type PostsResponse struct {
+	Posts      []processor.ProcessedMessage
+	TotalCount int64
 }
 
-// SearchPosts performs a text search on the database using the provided query string.
-// It supports pagination through page number and limit parameters.
-// Returns matching posts as a slice of ProcessedMessage and an error if any occurs.
-func (db *DB) SearchPosts(query string, page, limit int) ([]processor.ProcessedMessage, error) {
+// GetPostsWithFilters retrieves posts with specified filters and pagination
+// query: search term for post name
+// tag: specific tag to filter by
+// postType: type of post to filter
+// language: language tag to filter
+// page: page number for pagination
+// limit: number of posts per page
+func (d *DB) GetPostsWithFilters(query, tag, postType, language string, page, limit int) (PostsResponse, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	skip := (page - 1) * limit
+	opts := options.Find().SetSkip(int64(skip)).SetLimit(int64(limit))
 
-	filter := bson.D{{Key: "$text", Value: bson.D{{Key: "$search", Value: query}}}}
-	findOptions := options.Find().
-		SetSkip(int64(skip)).
-		SetLimit(int64(limit))
-
-	cur, err := db.collection.Find(ctx, filter, findOptions)
-	if err != nil {
-		return nil, err
+	filter := bson.M{}
+	if query != "" {
+		filter["name"] = bson.M{"$regex": query, "$options": "i"}
 	}
-	defer cur.Close(ctx)
-
-	var posts []processor.ProcessedMessage
-	for cur.Next(ctx) {
-		var message processor.ProcessedMessage
-		if err := cur.Decode(&message); err != nil {
-			return nil, err
-		}
-
-		posts = append(posts, message)
+	if postType != "" {
+		filter["type"] = postType
 	}
 
-	if err := cur.Err(); err != nil {
-		return nil, err
+	var tagConditions []bson.M
+	if tag != "" {
+		tagConditions = append(tagConditions, bson.M{"tags": tag})
 	}
-
-	return posts, nil
-}
-
-// GetPostsByTag retrieves posts that contain a specific tag.
-// It supports pagination through page number and limit parameters.
-// Returns matching posts as a slice of ProcessedMessage and an error if any occurs.
-func (db *DB) GetPostsByTag(tag string, page, limit int) ([]processor.ProcessedMessage, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	skip := (page - 1) * limit
-
-	tag = fmt.Sprintf("#%s", tag)
-
-	filter := bson.D{{Key: "tags", Value: bson.D{{Key: "$eq", Value: tag}}}}
-	findOptions := options.Find().
-		SetSkip(int64(skip)).
-		SetLimit(int64(limit))
-
-	cur, err := db.collection.Find(ctx, filter, findOptions)
-	if err != nil {
-		return nil, err
+	if language != "" {
+		tagConditions = append(tagConditions, bson.M{"tags": bson.M{"$regex": language + "$"}})
 	}
-	defer cur.Close(ctx)
-
-	var posts []processor.ProcessedMessage
-	for cur.Next(ctx) {
-		var message processor.ProcessedMessage
-		if err := cur.Decode(&message); err != nil {
-			return nil, err
-		}
-
-		posts = append(posts, message)
-	}
-
-	if err := cur.Err(); err != nil {
-		return nil, err
-	}
-
-	return posts, nil
-}
-
-// GetTags retrieves all unique tags in the collection.
-// Returns a slice of strings containing all unique tags and an error if any occurs.
-func (db *DB) GetTags() ([]string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	result := db.collection.Distinct(ctx, "tags", bson.D{})
-
-	var tags []interface{}
-	if err := result.Decode(&tags); err != nil {
-		return nil, err
-	}
-
-	tagList := make([]string, len(tags))
-	for i, tag := range tags {
-		if tagStr, ok := tag.(string); ok {
-			tagList[i] = tagStr
+	if len(tagConditions) > 0 {
+		if len(tagConditions) == 1 {
+			filter["tags"] = tagConditions[0]["tags"]
 		} else {
-			continue
+			filter["$and"] = tagConditions
 		}
 	}
 
-	return tagList, nil
+	total, err := d.collection.CountDocuments(ctx, filter)
+	if err != nil {
+		return PostsResponse{}, err
+	}
+
+	cur, err := d.collection.Find(ctx, filter, opts)
+	if err != nil {
+		return PostsResponse{}, err
+	}
+	defer cur.Close(ctx)
+
+	var posts []processor.ProcessedMessage
+	for cur.Next(ctx) {
+		var msg processor.ProcessedMessage
+		if err := cur.Decode(&msg); err != nil {
+			return PostsResponse{}, err
+		}
+		for i, tag := range msg.Tags {
+			msg.Tags[i] = strings.TrimPrefix(tag, "#")
+		}
+		posts = append(posts, msg)
+	}
+
+	if err := cur.Err(); err != nil {
+		return PostsResponse{}, err
+	}
+
+	return PostsResponse{Posts: posts, TotalCount: total}, nil
+}
+
+// GetPosts retrieves all posts with pagination
+func (d *DB) GetPosts(page, limit int) (PostsResponse, error) {
+	return d.GetPostsWithFilters("", "", "", "", page, limit)
+}
+
+// GetPostsByTag retrieves posts with a specific tag
+func (d *DB) GetPostsByTag(tag string, page, limit int) (PostsResponse, error) {
+	return d.GetPostsWithFilters("", tag, "", "", page, limit)
+}
+
+// GetPostsByType retrieves posts of a specific type
+func (d *DB) GetPostsByType(postType string, page, limit int) (PostsResponse, error) {
+	return d.GetPostsWithFilters("", "", postType, "", page, limit)
+}
+
+// GetPostsByLanguage retrieves posts in a specific language
+func (d *DB) GetPostsByLanguage(language string, page, limit int) (PostsResponse, error) {
+	return d.GetPostsWithFilters("", "", "", language, page, limit)
+}
+
+// SearchPosts searches posts by query string
+func (d *DB) SearchPosts(query string, page, limit int) (PostsResponse, error) {
+	return d.GetPostsWithFilters(query, "", "", "", page, limit)
+}
+
+// GetTags retrieves all unique tags from the collection
+func (d *DB) GetTags() ([]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	pipeline := mongo.Pipeline{
+		{{"$unwind", "$tags"}},
+		{{"$group", bson.D{{"_id", "$tags"}}}},
+		{{"$sort", bson.D{{"_id", 1}}}},
+		{{"$project", bson.D{{"tag", "$_id"}, {"_id", 0}}}},
+	}
+
+	cur, err := d.collection.Aggregate(ctx, pipeline)
+	if err != nil {
+		return nil, err
+	}
+	defer cur.Close(ctx)
+
+	var tags []string
+	for cur.Next(ctx) {
+		var result struct {
+			Tag string `bson:"tag"`
+		}
+		if err := cur.Decode(&result); err != nil {
+			return nil, err
+		}
+		tags = append(tags, strings.TrimPrefix(result.Tag, "#"))
+	}
+
+	if err := cur.Err(); err != nil {
+		return nil, err
+	}
+
+	if tags == nil {
+		return []string{}, nil
+	}
+	return tags, nil
+}
+
+// GetLanguages retrieves all unique language codes from tags
+func (d *DB) GetLanguages() ([]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	pipeline := mongo.Pipeline{
+		{{"$project", bson.D{{"lastTag", bson.M{"$arrayElemAt": []interface{}{"$tags", -1}}}}}},
+		{{"$match", bson.D{{"lastTag", bson.M{"$regex": "^[a-z]{2}$"}}}}},
+		{{"$group", bson.D{{"_id", "$lastTag"}}}},
+		{{"$sort", bson.D{{"_id", 1}}}},
+		{{"$project", bson.D{{"language", "$_id"}, {"_id", 0}}}},
+	}
+
+	cur, err := d.collection.Aggregate(ctx, pipeline)
+	if err != nil {
+		return nil, err
+	}
+	defer cur.Close(ctx)
+
+	var languages []string
+	for cur.Next(ctx) {
+		var result struct {
+			Language string `bson:"language"`
+		}
+		if err := cur.Decode(&result); err != nil {
+			return nil, err
+		}
+		languages = append(languages, result.Language)
+	}
+
+	if err := cur.Err(); err != nil {
+		return nil, err
+	}
+
+	if languages == nil {
+		return []string{}, nil
+	}
+	return languages, nil
 }

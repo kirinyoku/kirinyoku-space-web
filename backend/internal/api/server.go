@@ -59,19 +59,10 @@ func corsMiddleware() gin.HandlerFunc {
 // It sets up endpoints for retrieving posts (with search and tag filtering)
 // and getting all available tags.
 func (s *Server) setupRoutes() {
-	// Single route handling posts retrieval with optional search/tag filtering
-	s.router.GET("/posts", func(ctx *gin.Context) {
-		if searchQuery := ctx.Query("search"); searchQuery != "" {
-			s.handleSearchPosts(ctx)
-		} else if tag := ctx.Query("tag"); tag != "" {
-			s.handleGetPostsByTag(ctx)
-		} else {
-			s.handleGetPosts(ctx)
-		}
-	})
-
-	// Route for retrieving all unique tags from the database
+	s.router.GET("/posts", s.handleGetPosts)
 	s.router.GET("/tags", s.handleGetTags)
+	s.router.GET("/languages", s.handleGetLanguages)
+
 }
 
 // Start begins listening for HTTP requests on the specified address.
